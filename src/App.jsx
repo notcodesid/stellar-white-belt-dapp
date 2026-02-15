@@ -15,6 +15,10 @@ import {
 const server = new Horizon.Server('https://horizon-testnet.stellar.org');
 const networkPassphrase = Networks.TESTNET;
 
+function stellarExpertTxUrl(hash) {
+  return `https://stellar.expert/explorer/testnet/tx/${hash}`;
+}
+
 function extractHorizonResultCodes(error) {
   return error?.response?.data?.extras?.result_codes ?? null;
 }
@@ -46,7 +50,6 @@ function horizonHintFromCodes(resultCodes) {
 function formatHorizonError(error) {
   const data = error?.response?.data;
   const resultCodes = extractHorizonResultCodes(error);
-  const txHash = extractHorizonErrorHash(error);
 
   const parts = [];
   if (data?.title) parts.push(data.title);
@@ -55,7 +58,6 @@ function formatHorizonError(error) {
   if (Array.isArray(resultCodes?.operations) && resultCodes.operations.length > 0) {
     parts.push(`op: ${resultCodes.operations.join(', ')}`);
   }
-  if (txHash) parts.push(`hash: ${txHash}`);
 
   const hint = horizonHintFromCodes(resultCodes);
   if (hint) parts.push(`hint: ${hint}`);
@@ -70,7 +72,8 @@ export default function App() {
   const [destination, setDestination] = useState('');
   const [amount, setAmount] = useState('');
   const [memo, setMemo] = useState('');
-  const [feedback, setFeedback] = useState({ text: 'No transaction submitted yet.', type: '' });
+  const [feedback, setFeedback] = useState({ text: '', type: '', hash: '', url: '' });
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const connected = Boolean(address);
 
@@ -98,36 +101,37 @@ export default function App() {
       }
 
       setAddress(nextAddress);
-      setFeedback({ text: 'Wallet connected. Ready to send a testnet transaction.', type: '' });
+      setFeedback({ text: '', type: '', hash: '', url: '' });
       await refreshBalance(nextAddress);
     } catch (error) {
-      setFeedback({ text: `Wallet connection failed: ${error.message}`, type: 'error' });
+      setFeedback({ text: `Wallet connection failed: ${error.message}`, type: 'error', hash: '', url: '' });
     }
   };
 
   const disconnectWallet = () => {
     setAddress('');
     setBalance('—');
-    setFeedback({ text: 'Wallet disconnected in app state. You can reconnect any time.', type: '' });
+    setFeedback({ text: '', type: '', hash: '', url: '' });
   };
 
   const sendTransaction = async (event) => {
     event.preventDefault();
     if (!connected) {
-      setFeedback({ text: 'Connect your wallet first.', type: 'error' });
+      setFeedback({ text: 'Connect your wallet first.', type: 'error', hash: '', url: '' });
       return;
     }
     if (!StrKey.isValidEd25519PublicKey(destination.trim())) {
-      setFeedback({ text: 'Destination address is invalid.', type: 'error' });
+      setFeedback({ text: 'Destination address is invalid.', type: 'error', hash: '', url: '' });
       return;
     }
     if (Number(amount) <= 0) {
-      setFeedback({ text: 'Amount must be greater than zero.', type: 'error' });
+      setFeedback({ text: 'Amount must be greater than zero.', type: 'error', hash: '', url: '' });
       return;
     }
 
+    setIsSubmitting(true);
     try {
-      setFeedback({ text: 'Preparing transaction...', type: '' });
+      setFeedback({ text: 'Preparing transaction...', type: '', hash: '', url: '' });
 
       // Stellar payments require the destination account to exist (be funded).
       try {
@@ -137,6 +141,8 @@ export default function App() {
           setFeedback({
             text: 'Transaction blocked: destination account is not funded on testnet. Fund it via Friendbot and try again.',
             type: 'error',
+            hash: '',
+            url: '',
           });
           return;
         }
@@ -146,6 +152,7 @@ export default function App() {
       const sourceAccount = await server.loadAccount(address);
       const account = new Account(sourceAccount.accountId(), sourceAccount.sequence);
 
+      setFeedback({ text: 'Signing transaction in Freighter...', type: '', hash: '', url: '' });
       const txBuilder = new TransactionBuilder(account, {
         fee: BASE_FEE,
         networkPassphrase,
@@ -176,20 +183,39 @@ export default function App() {
       }
 
       const signedTx = TransactionBuilder.fromXDR(signedTxXdr, networkPassphrase);
+      setFeedback({ text: 'Submitting transaction to Stellar testnet...', type: '', hash: '', url: '' });
       const submitResult = await server.submitTransaction(signedTx);
 
-      setFeedback({ text: `Success! Transaction submitted. Hash: ${submitResult.hash}`, type: 'success' });
+      setFeedback({
+        text: 'Success! Transaction submitted. Hash:',
+        type: 'success',
+        hash: submitResult.hash,
+        url: stellarExpertTxUrl(submitResult.hash),
+      });
       setDestination('');
       setAmount('');
       setMemo('');
       await refreshBalance();
     } catch (error) {
-      setFeedback({ text: `Transaction failed: ${formatHorizonError(error)}`, type: 'error' });
+      const txHash = extractHorizonErrorHash(error);
+      setFeedback({
+        text: `Transaction failed: ${formatHorizonError(error)}`,
+        type: 'error',
+        hash: txHash || '',
+        url: txHash ? stellarExpertTxUrl(txHash) : '',
+      });
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
   return (
     <main className="container">
+      {isSubmitting ? (
+        <div className="loading-overlay" role="status" aria-live="polite" aria-busy="true">
+          <div className="spinner" aria-label="Loading" />
+        </div>
+      ) : null}
       <h1>Stellar White Belt dApp</h1>
       <p className="subtitle">Connect Freighter, check your testnet XLM balance, and send a payment.</p>
 
@@ -199,14 +225,12 @@ export default function App() {
           <button onClick={connectWallet} disabled={connected}>Connect Freighter</button>
           <button className="secondary" onClick={disconnectWallet} disabled={!connected}>Disconnect</button>
         </div>
-        <p><strong>Status:</strong> {connected ? 'Connected to testnet wallet' : 'Disconnected'}</p>
         <p><strong>Address:</strong> {connected ? address : '—'}</p>
       </section>
 
       <section className="card">
         <h2>2) Balance (Testnet XLM)</h2>
         <div className="actions">
-          <button onClick={() => refreshBalance()} disabled={!connected}>Refresh Balance</button>
         </div>
         <p><strong>XLM Balance:</strong> {balance}</p>
       </section>
@@ -222,22 +246,18 @@ export default function App() {
             Amount (XLM)
             <input value={amount} onChange={(e) => setAmount(e.target.value)} required type="number" min="0.0000001" step="0.0000001" placeholder="1" />
           </label>
-          <label>
-            Memo (optional)
-            <input value={memo} onChange={(e) => setMemo(e.target.value)} maxLength={28} placeholder="Payment note" />
-          </label>
           <button type="submit" disabled={!connected}>Send Transaction</button>
         </form>
-        <p className={`feedback ${feedback.type}`.trim()}>{feedback.text}</p>
-      </section>
-
-      <section className="card note">
-        <h2>Testnet setup notes</h2>
-        <ul>
-          <li>Install Freighter and set network to <strong>TESTNET</strong>.</li>
-          <li>Fund your account with Friendbot before sending XLM.</li>
-          <li>This app only uses Stellar testnet endpoints.</li>
-        </ul>
+        {feedback.text || feedback.hash ? (
+          <p className={`feedback ${feedback.type}`.trim()}>
+            {feedback.text}{' '}
+            {feedback.hash ? (
+              <a href={feedback.url} target="_blank" rel="noreferrer">
+                {feedback.hash}
+              </a>
+            ) : null}
+          </p>
+        ) : null}
       </section>
     </main>
   );
