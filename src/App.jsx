@@ -15,6 +15,55 @@ import {
 const server = new Horizon.Server('https://horizon-testnet.stellar.org');
 const networkPassphrase = Networks.TESTNET;
 
+function extractHorizonResultCodes(error) {
+  return error?.response?.data?.extras?.result_codes ?? null;
+}
+
+function extractHorizonErrorHash(error) {
+  return error?.response?.data?.hash ?? null;
+}
+
+function horizonHintFromCodes(resultCodes) {
+  if (!resultCodes) return '';
+  const ops = Array.isArray(resultCodes.operations) ? resultCodes.operations : [];
+
+  if (ops.includes('op_no_destination')) {
+    return 'Destination account is not funded on testnet. Fund it (Friendbot) or use a funded address.';
+  }
+  if (ops.includes('op_underfunded') || ops.includes('op_low_reserve')) {
+    return 'Insufficient spendable XLM. Try a smaller amount and leave XLM for minimum reserve + fees.';
+  }
+  if (resultCodes.transaction === 'tx_bad_seq') {
+    return 'Bad sequence number. Refresh balance and try again.';
+  }
+  if (resultCodes.transaction === 'tx_insufficient_fee') {
+    return 'Fee too low. Try again.';
+  }
+
+  return '';
+}
+
+function formatHorizonError(error) {
+  const data = error?.response?.data;
+  const resultCodes = extractHorizonResultCodes(error);
+  const txHash = extractHorizonErrorHash(error);
+
+  const parts = [];
+  if (data?.title) parts.push(data.title);
+  if (data?.detail) parts.push(data.detail);
+  if (resultCodes?.transaction) parts.push(`tx: ${resultCodes.transaction}`);
+  if (Array.isArray(resultCodes?.operations) && resultCodes.operations.length > 0) {
+    parts.push(`op: ${resultCodes.operations.join(', ')}`);
+  }
+  if (txHash) parts.push(`hash: ${txHash}`);
+
+  const hint = horizonHintFromCodes(resultCodes);
+  if (hint) parts.push(`hint: ${hint}`);
+
+  if (parts.length > 0) return parts.join(' | ');
+  return error?.message || 'Transaction failed.';
+}
+
 export default function App() {
   const [address, setAddress] = useState('');
   const [balance, setBalance] = useState('—');
@@ -40,16 +89,17 @@ export default function App() {
   const connectWallet = async () => {
     try {
       const connection = await isConnected();
-      if (connection.error) throw new Error(connection.error);
+      if (typeof connection === 'object' && connection?.error) throw new Error(connection.error);
 
       const access = await requestAccess();
-      if (access.error || !access.address) {
-        throw new Error(access.error || 'Freighter did not return an address.');
+      const nextAddress = typeof access === 'string' ? access : access?.address;
+      if (!nextAddress) {
+        throw new Error(access?.error || 'Freighter did not return an address.');
       }
 
-      setAddress(access.address);
+      setAddress(nextAddress);
       setFeedback({ text: 'Wallet connected. Ready to send a testnet transaction.', type: '' });
-      await refreshBalance(access.address);
+      await refreshBalance(nextAddress);
     } catch (error) {
       setFeedback({ text: `Wallet connection failed: ${error.message}`, type: 'error' });
     }
@@ -79,6 +129,20 @@ export default function App() {
     try {
       setFeedback({ text: 'Preparing transaction...', type: '' });
 
+      // Stellar payments require the destination account to exist (be funded).
+      try {
+        await server.loadAccount(destination.trim());
+      } catch (error) {
+        if (error?.response?.status === 404) {
+          setFeedback({
+            text: 'Transaction blocked: destination account is not funded on testnet. Fund it via Friendbot and try again.',
+            type: 'error',
+          });
+          return;
+        }
+        throw error;
+      }
+
       const sourceAccount = await server.loadAccount(address);
       const account = new Account(sourceAccount.accountId(), sourceAccount.sequence);
 
@@ -101,15 +165,17 @@ export default function App() {
 
       const unsignedTx = txBuilder.build();
       const signed = await signTransaction(unsignedTx.toXDR(), {
-        address,
         networkPassphrase,
+        address,
+        accountToSign: address,
       });
 
-      if (signed.error || !signed.signedTxXdr) {
-        throw new Error(signed.error || 'Signing was cancelled.');
+      const signedTxXdr = typeof signed === 'string' ? signed : signed?.signedTxXdr;
+      if (!signedTxXdr) {
+        throw new Error(signed?.error || 'Signing was cancelled.');
       }
 
-      const signedTx = TransactionBuilder.fromXDR(signed.signedTxXdr, networkPassphrase);
+      const signedTx = TransactionBuilder.fromXDR(signedTxXdr, networkPassphrase);
       const submitResult = await server.submitTransaction(signedTx);
 
       setFeedback({ text: `Success! Transaction submitted. Hash: ${submitResult.hash}`, type: 'success' });
@@ -118,7 +184,7 @@ export default function App() {
       setMemo('');
       await refreshBalance();
     } catch (error) {
-      setFeedback({ text: `Transaction failed: ${error.message}`, type: 'error' });
+      setFeedback({ text: `Transaction failed: ${formatHorizonError(error)}`, type: 'error' });
     }
   };
 
