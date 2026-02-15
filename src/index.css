@@ -1,0 +1,100 @@
+:root {
+  color-scheme: light;
+  font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+}
+
+body {
+  margin: 0;
+  background: #f5f7fb;
+  color: #18212f;
+}
+
+.container {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 24px 16px 48px;
+}
+
+h1 {
+  margin-bottom: 0.5rem;
+}
+
+.subtitle {
+  margin-top: 0;
+  color: #3a4d68;
+}
+
+.card {
+  background: #fff;
+  border-radius: 12px;
+  border: 1px solid #d8e0ed;
+  padding: 16px;
+  margin-top: 16px;
+  box-shadow: 0 4px 10px rgb(16 24 40 / 4%);
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+button {
+  border: 0;
+  border-radius: 8px;
+  padding: 10px 14px;
+  background: #1757d1;
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+button.secondary {
+  background: #44556f;
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+form {
+  display: grid;
+  gap: 12px;
+}
+
+label {
+  display: grid;
+  gap: 6px;
+  font-weight: 600;
+}
+
+input {
+  border: 1px solid #bec8d6;
+  border-radius: 8px;
+  padding: 10px;
+  font-size: 14px;
+}
+
+.feedback {
+  padding: 10px;
+  border-radius: 8px;
+  background: #eff3fb;
+  border: 1px solid #d5e0f4;
+}
+
+.feedback.success {
+  color: #0f5132;
+  background: #d1e7dd;
+  border-color: #badbcc;
+}
+
+.feedback.error {
+  color: #842029;
+  background: #f8d7da;
+  border-color: #f5c2c7;
+}
+
+.note ul {
+  margin-bottom: 0;
+}
