@@ -72,7 +72,8 @@ export default function App() {
   const [destination, setDestination] = useState('');
   const [amount, setAmount] = useState('');
   const [memo, setMemo] = useState('');
-  const [feedback, setFeedback] = useState({ text: '', type: '', hash: '', url: '' });
+  const [feedback, setFeedback] = useState({ text: '', type: '' });
+  const [lastTx, setLastTx] = useState(null); // { hash, url }
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const connected = Boolean(address);
@@ -101,37 +102,39 @@ export default function App() {
       }
 
       setAddress(nextAddress);
-      setFeedback({ text: '', type: '', hash: '', url: '' });
+      setFeedback({ text: '', type: '' });
       await refreshBalance(nextAddress);
     } catch (error) {
-      setFeedback({ text: `Wallet connection failed: ${error.message}`, type: 'error', hash: '', url: '' });
+      setFeedback({ text: `Wallet connection failed: ${error.message}`, type: 'error' });
     }
   };
 
   const disconnectWallet = () => {
     setAddress('');
     setBalance('—');
-    setFeedback({ text: '', type: '', hash: '', url: '' });
+    setFeedback({ text: '', type: '' });
+    setLastTx(null);
   };
 
   const sendTransaction = async (event) => {
     event.preventDefault();
     if (!connected) {
-      setFeedback({ text: 'Connect your wallet first.', type: 'error', hash: '', url: '' });
+      setFeedback({ text: 'Connect your wallet first.', type: 'error' });
       return;
     }
     if (!StrKey.isValidEd25519PublicKey(destination.trim())) {
-      setFeedback({ text: 'Destination address is invalid.', type: 'error', hash: '', url: '' });
+      setFeedback({ text: 'Destination address is invalid.', type: 'error' });
       return;
     }
     if (Number(amount) <= 0) {
-      setFeedback({ text: 'Amount must be greater than zero.', type: 'error', hash: '', url: '' });
+      setFeedback({ text: 'Amount must be greater than zero.', type: 'error' });
       return;
     }
 
     setIsSubmitting(true);
+    setLastTx(null);
     try {
-      setFeedback({ text: 'Preparing transaction...', type: '', hash: '', url: '' });
+      setFeedback({ text: 'Preparing transaction...', type: '' });
 
       // Stellar payments require the destination account to exist (be funded).
       try {
@@ -141,8 +144,6 @@ export default function App() {
           setFeedback({
             text: 'Transaction blocked: destination account is not funded on testnet. Fund it via Friendbot and try again.',
             type: 'error',
-            hash: '',
-            url: '',
           });
           return;
         }
@@ -152,7 +153,7 @@ export default function App() {
       const sourceAccount = await server.loadAccount(address);
       const account = new Account(sourceAccount.accountId(), sourceAccount.sequence);
 
-      setFeedback({ text: 'Signing transaction in Freighter...', type: '', hash: '', url: '' });
+      setFeedback({ text: 'Signing transaction in Freighter...', type: '' });
       const txBuilder = new TransactionBuilder(account, {
         fee: BASE_FEE,
         networkPassphrase,
@@ -183,27 +184,17 @@ export default function App() {
       }
 
       const signedTx = TransactionBuilder.fromXDR(signedTxXdr, networkPassphrase);
-      setFeedback({ text: 'Submitting transaction to Stellar testnet...', type: '', hash: '', url: '' });
+      setFeedback({ text: 'Submitting transaction to Stellar testnet...', type: '' });
       const submitResult = await server.submitTransaction(signedTx);
 
-      setFeedback({
-        text: 'Success! Transaction submitted. Hash:',
-        type: 'success',
-        hash: submitResult.hash,
-        url: stellarExpertTxUrl(submitResult.hash),
-      });
+      setFeedback({ text: 'Success! Transaction submitted.', type: 'success' });
+      setLastTx({ hash: submitResult.hash, url: stellarExpertTxUrl(submitResult.hash) });
       setDestination('');
       setAmount('');
       setMemo('');
       await refreshBalance();
     } catch (error) {
-      const txHash = extractHorizonErrorHash(error);
-      setFeedback({
-        text: `Transaction failed: ${formatHorizonError(error)}`,
-        type: 'error',
-        hash: txHash || '',
-        url: txHash ? stellarExpertTxUrl(txHash) : '',
-      });
+      setFeedback({ text: `Transaction failed: ${formatHorizonError(error)}`, type: 'error' });
     } finally {
       setIsSubmitting(false);
     }
@@ -248,14 +239,18 @@ export default function App() {
           </label>
           <button type="submit" disabled={!connected}>Send Transaction</button>
         </form>
-        {feedback.text || feedback.hash ? (
+        {feedback.text ? (
           <p className={`feedback ${feedback.type}`.trim()}>
-            {feedback.text}{' '}
-            {feedback.hash ? (
-              <a href={feedback.url} target="_blank" rel="noreferrer">
-                {feedback.hash}
-              </a>
-            ) : null}
+            {feedback.text}
+          </p>
+        ) : null}
+
+        {lastTx ? (
+          <p className="feedback">
+            <strong>Transaction hash:</strong>{' '}
+            <a href={lastTx.url} target="_blank" rel="noreferrer">
+              {lastTx.hash}
+            </a>
           </p>
         ) : null}
       </section>
